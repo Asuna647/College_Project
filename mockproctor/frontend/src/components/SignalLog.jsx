@@ -1,8 +1,8 @@
-export default function SignalLog({ faceState, events }) {
+export default function SignalLog({ faceState, gazeState, tabState, events }) {
   const signals = [
     { key: "face", label: "FACE LOCK", tag: "PHASE 1", status: faceDotClass(faceState) },
-    { key: "gaze", label: "GAZE", tag: "PHASE 2", status: "" },
-    { key: "tab", label: "TAB FOCUS", tag: "PHASE 3", status: "" },
+    { key: "gaze", label: "GAZE", tag: "PHASE 2", status: gazeDotClass(gazeState) },
+    { key: "tab", label: "TAB FOCUS", tag: "PHASE 3", status: tabDotClass(tabState) },
   ];
 
   return (
@@ -37,6 +37,18 @@ export default function SignalLog({ faceState, events }) {
 function faceDotClass(state) {
   if (state === "ok") return "ok";
   if (state === "no_face" || state === "multi_face") return "rec";
+  return "";
+}
+
+function gazeDotClass(state) {
+  if (state === "ok") return "ok";
+  if (state === "looking_away") return "rec";
+  return "";
+}
+
+function tabDotClass(state) {
+  if (state === "ok") return "ok";
+  if (state === "tab_switch" || state === "window_blur") return "rec";
   return "";
 }
 
