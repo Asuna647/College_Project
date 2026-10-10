@@ -256,11 +256,6 @@ export default function WebcamFeed({ active, onSignalChange, onGazeChange, onTab
       }
     }
 
-    start().catch((err) => {
-      console.error(err);
-      setStatus("camera error");
-    });
-
     // Phase 3: Handle browser signal events with debouncing
     function handleBrowserSignal(signal) {
       if (debouncerRef.current.shouldEmit(signal.type)) {

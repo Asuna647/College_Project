@@ -128,13 +128,23 @@ export default function ReportDashboard({ initialSessionId }) {
 
   const exportCSV = () => {
     if (!summary) return;
-    const headers = ["Event ID", "Event Type", "Timestamp", "Metadata Details"];
-    const rows = summary.events.map((e) => [
-      e.id,
-      e.event_type,
-      e.timestamp,
-      `"${JSON.stringify(e.meta).replace(/"/g, '""')}"`,
-    ]);
+    const sanitizeCsvField = (val) => {
+      const str = String(val ?? "");
+      if (/^[=+\-@\t\r]/.test(str)) {
+        return `'${str}`;
+      }
+      return str;
+    };
+
+    const headers = ["Event ID", "Event Type", "Timestamp", "Metadata Details"].map(sanitizeCsvField);
+    const rows = summary.events.map((e) => {
+      const id = sanitizeCsvField(e.id);
+      const type = sanitizeCsvField(e.event_type);
+      const ts = sanitizeCsvField(e.timestamp);
+      const rawMeta = JSON.stringify(e.meta);
+      const meta = sanitizeCsvField(rawMeta).replace(/"/g, '""');
+      return [id, type, ts, `"${meta}"`];
+    });
 
     const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
 

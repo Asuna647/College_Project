@@ -13,6 +13,7 @@ Run with:
 """
 
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -24,15 +25,28 @@ from database import get_connection, init_db
 
 app = FastAPI(title="MockProctor API")
 
-# Vite's default dev server port. Update this if you deploy the frontend elsewhere.
+# Allow dynamic CORS configuration via environment variable
+cors_origins_env = os.getenv("CORS_ORIGINS", "http://localhost:5173")
+origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 init_db()
+
+
+def parse_iso_datetime(dt_str: str | None) -> datetime | None:
+    if not dt_str:
+        return None
+    try:
+        normalized = dt_str.replace("Z", "+00:00")
+        return datetime.fromisoformat(normalized)
+    except Exception:
+        return datetime.now(timezone.utc)
 
 
 class EventIn(BaseModel):
@@ -86,8 +100,8 @@ def list_sessions():
 
     result = []
     for r in rows:
-        started = datetime.fromisoformat(r["started_at"]) if r["started_at"] else None
-        ended = datetime.fromisoformat(r["ended_at"]) if r["ended_at"] else None
+        started = parse_iso_datetime(r["started_at"])
+        ended = parse_iso_datetime(r["ended_at"])
         duration = (ended - started).total_seconds() if (started and ended) else None
 
         result.append({
@@ -224,8 +238,8 @@ def get_session_summary(session_id: str):
     else:
         status = "VIOLATION"
 
-    started_dt = datetime.fromisoformat(session["started_at"]) if session["started_at"] else None
-    ended_dt = datetime.fromisoformat(session["ended_at"]) if session["ended_at"] else datetime.now(timezone.utc)
+    started_dt = parse_iso_datetime(session["started_at"])
+    ended_dt = parse_iso_datetime(session["ended_at"]) or datetime.now(timezone.utc)
 
     if started_dt and ended_dt and ended_dt > started_dt:
         total_duration = (ended_dt - started_dt).total_seconds()
@@ -246,10 +260,11 @@ def get_session_summary(session_id: str):
 
     for ev in events:
         try:
-            ev_dt = datetime.fromisoformat(ev["timestamp"])
-            offset = (ev_dt - started_dt).total_seconds()
-            b_idx = min(bucket_count - 1, max(0, int(offset // bucket_duration)))
-            timeline_buckets[b_idx]["count"] += 1
+            ev_dt = parse_iso_datetime(ev["timestamp"])
+            if ev_dt and started_dt:
+                offset = (ev_dt - started_dt).total_seconds()
+                b_idx = min(bucket_count - 1, max(0, int(offset // bucket_duration)))
+                timeline_buckets[b_idx]["count"] += 1
         except Exception:
             pass
 
