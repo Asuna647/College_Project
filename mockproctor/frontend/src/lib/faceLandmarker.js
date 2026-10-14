@@ -27,11 +27,11 @@ export async function initFaceLandmarker() {
     baseOptions: {
       modelAssetPath:
         "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-      delegate: "GPU",
+      delegate: "CPU",
     },
     runningMode: "VIDEO",
     numFaces: 1, // Only need one face for yaw estimation
-    minFaceDetectionConfidence: 0.7, // FIXED: Add confidence threshold
+    minFaceDetectionConfidence: 0.40, // Permissive confidence threshold
   });
 
   return landmarker;

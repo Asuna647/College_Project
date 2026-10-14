@@ -29,8 +29,8 @@ export default function App() {
       setSessionId(session_id);
       setSelectedReportSessionId(session_id);
       setEvents([]);
-      setFaceState("unknown");
-      setGazeState("unknown");
+      setFaceState("ok");
+      setGazeState("ok");
       setTabState("ok");
       setActive(true);
       setView("live");

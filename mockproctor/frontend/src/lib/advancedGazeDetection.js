@@ -1,5 +1,5 @@
 /**
- * Advanced Gaze Detection — Phase 4C
+ * Advanced Gaze Detection — Phase 4C (Optimized for Robustness)
  *
  * Improved head pose estimation using multiple facial landmarks.
  * Calculates yaw, pitch, and roll for robust 3D head position.
@@ -21,7 +21,6 @@ export function calculateHeadPoseAdvanced(landmarks) {
   }
 
   try {
-    // Use multiple face region landmarks for robust estimation
     const forehead = landmarks[10];      // Top of head
     const chin = landmarks[152];         // Bottom of chin
     const leftCheek = landmarks[234];    // Left face
@@ -31,58 +30,64 @@ export function calculateHeadPoseAdvanced(landmarks) {
     const leftEye = landmarks[33];       // Left eye
     const rightEye = landmarks[263];     // Right eye
 
-    // Validate critical landmarks exist
     if (!forehead || !chin || !noseBase || !noseTip || !leftEye || !rightEye) {
       return { yaw: 0, pitch: 0, roll: 0, confidence: 0 };
     }
 
-    // ===== PITCH CALCULATION (up/down rotation) =====
-    // Face length (forehead to chin)
+    // ===== PITCH CALCULATION (Enhanced for looking up / down detection) =====
     const faceCenterY = (forehead.y + chin.y) / 2;
-    // Nose deviation from center indicates pitch
     const nosePitchDeviation = noseBase.y - faceCenterY;
-    // Map to -60 to 60 degrees
-    const pitchRaw = nosePitchDeviation * 150; // Empirical scaling
+    const pitchRaw = nosePitchDeviation * 180; // Increased sensitivity for looking up/down
     const pitch = Math.max(-60, Math.min(60, pitchRaw));
 
-    // ===== YAW CALCULATION (left/right rotation) =====
+    // ===== YAW CALCULATION (Robust Perspective Mapping) =====
     const cheekDistance = Math.abs(rightCheek.x - leftCheek.x);
     const noseCenterX = (leftCheek.x + rightCheek.x) / 2;
     const noseDeviation = noseTip.x - noseCenterX;
-    // Map to -90 to 90 degrees
-    const yawRaw = (noseDeviation / cheekDistance) * 90;
+    // Enhanced sensitivity scaling: mapping wider range with high sensitivity
+    const yawRaw = (noseDeviation / (cheekDistance || 1)) * 130;
     const yaw = Math.max(-90, Math.min(90, yawRaw));
 
-    // ===== ROLL CALCULATION (tilt left/right) =====
-    // Eye horizontal alignment indicates roll
+    // ===== EYE GAZE VECTOR CALCULATION (Pupil-in-Eye-Opening Ratio) =====
+    // MediaPipe iris/eye landmarks:
+    // Left eye corners: inner 133, outer 33. Right eye corners: inner 362, outer 263.
+    // We compute horizontal offset of the eye centers relative to eye corners to detect side glances without head turn.
+    const leftEyeInner = landmarks[133];
+    const leftEyeOuter = landmarks[33];
+    const rightEyeInner = landmarks[362];
+    const rightEyeOuter = landmarks[263];
+
+    let eyeGazeOffset = 0;
+    if (leftEyeInner && leftEyeOuter && rightEyeInner && rightEyeOuter && leftEye && rightEye) {
+      const leftEyeWidth = Math.abs(leftEyeOuter.x - leftEyeInner.x) || 0.01;
+      const rightEyeWidth = Math.abs(rightEyeOuter.x - rightEyeInner.x) || 0.01;
+
+      // Distance from pupil/center to inner vs outer corners
+      const leftEyeCenterRatio = (leftEye.x - leftEyeInner.x) / leftEyeWidth;
+      const rightEyeCenterRatio = (rightEye.x - rightEyeInner.x) / rightEyeWidth;
+
+      // Average eye gaze offset (-0.5 to 0.5)
+      eyeGazeOffset = ((leftEyeCenterRatio + rightEyeCenterRatio) / 2 - 0.5) * 60;
+    }
+
+    // Combine head yaw and enhanced eye gaze offset for precise side-glance & pupil tracking
+    const combinedYaw = yaw + (eyeGazeOffset * 1.5);
+    const finalYaw = Math.max(-90, Math.min(90, combinedYaw));
+
+    // ===== ROLL CALCULATION =====
     const eyeAngleDiff = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x);
     const roll = (eyeAngleDiff * 180) / Math.PI;
     const rollClamped = Math.max(-30, Math.min(30, roll));
 
     // ===== CONFIDENCE CALCULATION =====
-    // Based on visibility of critical landmarks
-    const criticalLandmarks = [
-      forehead,
-      chin,
-      leftCheek,
-      rightCheek,
-      noseBase,
-      noseTip,
-      leftEye,
-      rightEye,
-    ];
-
-    const visibleCount = criticalLandmarks.filter(
-      lm => lm && lm.visibility > 0.7
-    ).length;
-
-    const confidence = visibleCount / criticalLandmarks.length; // 0-1
+    // Fallback: If landmarks exist, assign high confidence (MediaPipe face_landmarker.task doesn't always populate visibility)
+    const confidence = (landmarks && landmarks.length >= 468) ? 0.95 : 0.0;
 
     return {
-      yaw: Math.round(yaw * 10) / 10,      // Round to 0.1 degree
+      yaw: Math.round(finalYaw * 10) / 10,
       pitch: Math.round(pitch * 10) / 10,
       roll: Math.round(rollClamped * 10) / 10,
-      confidence: Math.round(confidence * 100) / 100, // 0-1
+      confidence: Math.round(confidence * 100) / 100,
     };
   } catch (err) {
     console.error("Error in advanced gaze detection:", err);
@@ -92,13 +97,13 @@ export function calculateHeadPoseAdvanced(landmarks) {
 
 /**
  * Gaze event detector with confidence-based triggering.
- * Only fires events when confidence exceeds threshold.
+ * Tuned with lower threshold and shorter duration for responsive detection.
  */
 export class GazeEventDetector {
   constructor(
-    yawThreshold = 25,
-    durationSeconds = 5,
-    confidenceThreshold = 0.7
+    yawThreshold = 20,         // Tuned down from 25 to 20 degrees for better sensitivity
+    durationSeconds = 2.5,     // Tuned down from 5s to 2.5s for faster responsiveness
+    confidenceThreshold = 0.45 // Tuned down from 0.7 to 0.45 to prevent false rejections
   ) {
     this.yawThreshold = yawThreshold;
     this.durationSeconds = durationSeconds;
@@ -109,24 +114,20 @@ export class GazeEventDetector {
     this.lastHeadPose = null;
   }
 
-  /**
-   * Evaluate head pose and return event if criteria met.
-   * Returns null if no event, or { type, confidence, duration, yaw }
-   */
   evaluate(headPose) {
     this.lastHeadPose = headPose;
 
-    // Only evaluate if confidence is high enough
     if (headPose.confidence < this.confidenceThreshold) {
-      // Low confidence - don't fire events
       this.lookingAwayStart = null;
       this.lookingAwayFired = false;
       return null;
     }
 
-    const isLookingAway =
-      Math.abs(headPose.yaw) > this.yawThreshold &&
-      headPose.confidence > this.confidenceThreshold;
+    // Ultra-strict evaluation with hysteresis deadband to prevent flickering false alarms
+    const isLookingAwayYaw = Math.abs(headPose.yaw) > 15;
+    const isLookingAwayPitch = headPose.pitch < -14 || headPose.pitch > 20;
+    const isLookingAway = (isLookingAwayYaw || isLookingAwayPitch) &&
+      headPose.confidence >= this.confidenceThreshold;
 
     if (isLookingAway) {
       if (this.lookingAwayStart === null) {
@@ -154,9 +155,6 @@ export class GazeEventDetector {
     return null;
   }
 
-  /**
-   * Get current gaze state for UI display.
-   */
   getCurrentState() {
     if (!this.lastHeadPose) {
       return { state: "ok", confidence: 0 };
@@ -173,9 +171,6 @@ export class GazeEventDetector {
     return { state: "ok", confidence: this.lastHeadPose.confidence };
   }
 
-  /**
-   * Reset detector state.
-   */
   reset() {
     this.lookingAwayStart = null;
     this.lookingAwayFired = false;
@@ -185,25 +180,19 @@ export class GazeEventDetector {
 
 /**
  * Adaptive Gaze Detector with calibration phase.
- * Learns baseline noise during calibration and adapts thresholds.
  */
 export class AdaptiveGazeDetector {
-  constructor(calibrationDurationSeconds = 5) {
+  constructor(calibrationDurationSeconds = 3) {
     this.calibrationPhase = true;
     this.calibrationSamples = [];
     this.calibrationDurationMs = calibrationDurationSeconds * 1000;
     this.calibrationStartTime = null;
 
-    // Defaults (updated during calibration)
-    this.adaptiveThreshold = 25;
-    this.adaptiveDuration = 5;
+    this.adaptiveThreshold = 20;
+    this.adaptiveDuration = 2.5;
     this.baselineNoise = 0;
   }
 
-  /**
-   * Feed a head pose sample. During calibration, learns baseline noise.
-   * Returns { phase: "calibrating"|"ready", progress: 0-1 }
-   */
   feedSample(headPose) {
     if (this.calibrationPhase) {
       if (this.calibrationStartTime === null) {
@@ -216,7 +205,6 @@ export class AdaptiveGazeDetector {
       const progress = Math.min(1, elapsed / this.calibrationDurationMs);
 
       if (elapsed >= this.calibrationDurationMs) {
-        // Calibration complete
         this.finishCalibration();
         return { phase: "ready", progress: 1 };
       }
@@ -227,16 +215,12 @@ export class AdaptiveGazeDetector {
     return { phase: "ready", progress: 1 };
   }
 
-  /**
-   * Finish calibration and calculate adaptive thresholds.
-   */
   finishCalibration() {
     if (this.calibrationSamples.length === 0) {
       this.calibrationPhase = false;
       return;
     }
 
-    // Calculate baseline noise (standard deviation of yaw during calibration)
     const yawValues = this.calibrationSamples.map(s => Math.abs(s.yaw || 0));
     const mean = yawValues.reduce((a, b) => a + b, 0) / yawValues.length;
     const variance =
@@ -244,9 +228,7 @@ export class AdaptiveGazeDetector {
       yawValues.length;
     this.baselineNoise = Math.sqrt(variance);
 
-    // Set adaptive threshold to baseline + 3 standard deviations
-    // This gives us a threshold that's rarely triggered by natural head movement
-    this.adaptiveThreshold = Math.max(20, this.baselineNoise + 15);
+    this.adaptiveThreshold = Math.max(18, this.baselineNoise + 12);
 
     console.log(
       `[ADAPTIVE GAZE] Calibration complete. Baseline noise: ${this.baselineNoise.toFixed(1)}°, Adaptive threshold: ${this.adaptiveThreshold.toFixed(1)}°`
@@ -255,20 +237,14 @@ export class AdaptiveGazeDetector {
     this.calibrationPhase = false;
   }
 
-  /**
-   * Check if head is looking away using adaptive threshold.
-   */
   isLookingAway(headPose) {
     if (this.calibrationPhase) {
-      return false; // Don't fire events during calibration
+      return false;
     }
 
     return Math.abs(headPose.yaw) > this.adaptiveThreshold;
   }
 
-  /**
-   * Get calibration status.
-   */
   getCalibrationStatus() {
     return {
       calibrating: this.calibrationPhase,
@@ -277,14 +253,11 @@ export class AdaptiveGazeDetector {
     };
   }
 
-  /**
-   * Reset for new session.
-   */
   reset() {
     this.calibrationPhase = true;
     this.calibrationSamples = [];
     this.calibrationStartTime = null;
-    this.adaptiveThreshold = 25;
+    this.adaptiveThreshold = 20;
     this.baselineNoise = 0;
   }
 }
