@@ -1,53 +1,51 @@
 /**
- * Thin wrapper around MediaPipe's FaceDetector task.
- * Model and WASM runtime load from Google's public CDN.
- *
- * Upgraded for Robustness (Senior Dev + Relevance Engineer standards):
- * - Switched to blaze_face_full_range model to support blurred backgrounds and distant subjects.
- * - Optimized confidence threshold to 0.50 with robust post-filtering to prevent false negatives.
+ * MediaPipe FaceDetector wrapper. Runtime version matches the package version
+ * resolved by the supplied project's lockfile (0.10.35).
  */
-
 import { FaceDetector, FilesetResolver } from "@mediapipe/tasks-vision";
 
+const MEDIAPIPE_VERSION = "0.10.35";
 let detector = null;
+let detectorPromise = null;
 
-export async function initFaceDetector() {
-  if (detector) return detector;
+export function initFaceDetector() {
+  if (detector) return Promise.resolve(detector);
+  if (detectorPromise) return detectorPromise;
 
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
-  );
-
-  detector = await FaceDetector.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath:
-        "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/1/blaze_face_full_range.tflite",
-      delegate: "CPU",
-    },
-    runningMode: "VIDEO",
-    minDetectionConfidence: 0.45, // Optimized confidence threshold for full-range model
+  detectorPromise = (async () => {
+    const vision = await FilesetResolver.forVisionTasks(
+      `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
+    );
+    const instance = await FaceDetector.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath:
+          "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+        delegate: "CPU",
+      },
+      runningMode: "VIDEO",
+      minDetectionConfidence: 0.35,
+    });
+    detector = instance;
+    return detector;
+  })().catch((error) => {
+    detectorPromise = null;
+    throw error;
   });
-
-  return detector;
+  return detectorPromise;
 }
 
-/**
- * Runs detection on a single video frame.
- * `timestampMs` must strictly increase between calls.
- */
 export function detectFaces(video, timestampMs) {
-  if (!detector) {
-    throw new Error("Face detector not initialized — call initFaceDetector() first");
+  if (!detector) throw new Error("Face detector is not initialized.");
+  if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+    return { detections: [] };
   }
   const result = detector.detectForVideo(video, timestampMs);
-
-  // Filter detections by relaxed confidence threshold to prevent false dropouts
-  if (result.detections) {
-    result.detections = result.detections.filter((detection) => {
-      const confidence = detection.categories?.[0]?.score ?? 0;
-      return confidence > 0.30; // Highly permissive threshold
-    });
-  }
-
-  return result;
+  const detections = Array.isArray(result?.detections) ? result.detections : [];
+  return {
+    ...result,
+    detections: detections.filter((detection) => {
+      const score = Number(detection?.categories?.[0]?.score ?? 0);
+      return Number.isFinite(score) && score >= 0.20;
+    }),
+  };
 }

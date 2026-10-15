@@ -10,7 +10,7 @@ MockProctor is a full-stack automated exam proctoring system. It combines client
 - **Framework & Build:** React 18, Vite
 - **Computer Vision & Signal Processing:** MediaPipe Vision Tasks (`@mediapipe/tasks-vision`)
   - **Face Detection:** `no_face` and `multi_face` signal streams.
-  - **Landmark Tracking & Gaze Estimation:** Head yaw calculation for `looking_away` detection.
+  - **Landmark Tracking & Gaze Estimation:** User-specific nine-point viewport calibration with confidence-gated, sustained out-of-screen gaze detection.
 - **Browser Event Listeners:** Page Visibility API & Window Blur handlers for `tab_switch` and `window_blur`.
 - **UI & Styling:** Cyberpunk On-Screen Display (OSD) theme, SVG Radial Progress Gauges, Flexbox/Grid responsive layout, WCAG 2.1 AA accessibility compliant.
 
@@ -61,7 +61,7 @@ Open `http://localhost:5173` in your browser.
 | `multi_face` | MediaPipe FaceDetector detects $\ge 2$ faces | **-15 pts** |
 | `no_face` | MediaPipe FaceDetector detects 0 faces | **-10 pts** |
 | `tab_switch` | Browser `visibilitychange` API (tab hidden) | **-10 pts** |
-| `looking_away` | Head yaw angle exceeds $\pm 15^\circ$ or pitch outside normal range | **-5 pts** |
+| `looking_away` | Calibrated gaze estimate remains outside the viewport tolerance boundary for at least 1.8 seconds with sufficient confidence | **-5 pts** |
 | `window_blur` | Browser `window.onblur` event | **-5 pts** |
 
 ### Integrity Trust Score Formula
@@ -176,3 +176,9 @@ mockproctor/
 │   └── package.json
 └── README.md
 ```
+
+## Personalized screen-gaze calibration
+
+Before gaze-based anomalies are enabled, MockProctor asks the user to complete a nine-point calibration across the browser viewport. The per-session mapping learns from that user's iris-relative eye features and head-pose proxies. A `looking_away` event is emitted only when the predicted gaze remains beyond the calibrated viewport plus a 4% tolerance margin for at least 1.8 seconds with sufficient confidence. Uncertain tracking is ignored rather than treated as a gaze violation. Face absence and multiple-face anomalies remain independent of gaze calibration.
+
+This is a webcam-based estimate, not a dedicated eye tracker; calibration quality depends on lighting, camera placement, glasses/reflections, and the user's ability to follow the targets. The live diagnostics panel shows predicted normalized screen coordinates and confidence, making it easier to tell whether a problem is in landmark tracking, calibration, or the boundary threshold. If calibration is inconsistent, the user can retry it. The mapping is held in memory for the current page session and is not uploaded as biometric data by this feature.
